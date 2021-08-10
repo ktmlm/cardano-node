@@ -71,6 +71,7 @@ import           Control.Monad.Fail (fail)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Short as SBS
 import           Data.Coerce
+import qualified Data.Map.Strict as Map
 import           Data.String
 
 import qualified Cardano.Binary as CBOR
@@ -513,7 +514,7 @@ genTxBodyContent era = do
   txMetadata <- genTxMetadataInEra era
   txAuxScripts <- genTxAuxScripts era
   let txExtraKeyWits = TxExtraKeyWitnessesNone --TODO: Alonzo era: Generate witness key hashes
-  txProtocolParams <- BuildTxWith <$> Gen.maybe (genProtocolParameters era)
+  txProtocolParams <- BuildTxWith <$> Gen.maybe genProtocolParameters
   txWithdrawals <- genTxWithdrawals era
   txCertificates <- genTxCertificates era
   txUpdateProposal <- genTxUpdateProposal era
@@ -680,8 +681,8 @@ genPraosNonce = makePraosNonce <$> Gen.bytes (Range.linear 0 32)
 genMaybePraosNonce :: Gen (Maybe PraosNonce)
 genMaybePraosNonce = Gen.maybe genPraosNonce
 
-genProtocolParameters :: CardanoEra era -> Gen ProtocolParameters
-genProtocolParameters era =
+genProtocolParameters :: Gen ProtocolParameters
+genProtocolParameters =
   ProtocolParameters
     <$> ((,) <$> genNat <*> genNat)
     <*> genRational
@@ -701,7 +702,7 @@ genProtocolParameters era =
     <*> genRational
     <*> genRational
     <*> Gen.maybe genLovelace
-    <*> genCostModels era
+    <*> genCostModels
     <*> Gen.maybe genExecutionUnitPrices
     <*> Gen.maybe genExecutionUnits
     <*> Gen.maybe genExecutionUnits
@@ -729,7 +730,7 @@ genProtocolParametersUpdate era = do
   protocolUpdateMonetaryExpansion   <- Gen.maybe genRational
   protocolUpdateTreasuryCut         <- Gen.maybe genRational
   protocolUpdateUTxOCostPerWord     <- alonzoParam era genLovelace
-  protocolUpdateCostModels          <- genCostModels era
+  protocolUpdateCostModels          <- genCostModels
   protocolUpdatePrices              <- alonzoParam era genExecutionUnitPrices
   protocolUpdateMaxTxExUnits        <- alonzoParam era genExecutionUnits
   protocolUpdateMaxBlockExUnits     <- alonzoParam era genExecutionUnits

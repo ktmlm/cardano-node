@@ -39,7 +39,7 @@ test_roundtrip_protocol_parameters_JSON :: [TestTree]
 test_roundtrip_protocol_parameters_JSON =
   [ testProperty (show era) $
     H.property $ do
-      pp <- forAll $ genProtocolParameters era
+      pp <- forAll genProtocolParameters
       tripping pp encode eitherDecode
   | AnyCardanoEra era <- [minBound..]
   ]
