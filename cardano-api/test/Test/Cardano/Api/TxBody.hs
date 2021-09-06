@@ -194,6 +194,7 @@ viewBodyContent body =
     , txMintValue       = viewMintValue    $ txMintValue      body
     , txOuts            =                    txOuts           body
     , txProtocolParams  = ViewTx
+    , txScriptValidity  =                    txScriptValidity body
     , txUpdateProposal  =                    txUpdateProposal body
     , txValidityRange   =                    txValidityRange  body
     , txWithdrawals     = viewWithdrawals  $ txWithdrawals    body
@@ -244,6 +245,7 @@ buildBodyContent body =
     , txOuts            =                     txOuts           body
     , txProtocolParams  = BuildTxWith Nothing
     , txUpdateProposal  =                     txUpdateProposal body
+    , txScriptValidity  =                     txScriptValidity body
     , txValidityRange   =                     txValidityRange  body
     , txWithdrawals     = buildWithdrawals  $ txWithdrawals    body
     }
