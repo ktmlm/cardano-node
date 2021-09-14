@@ -75,21 +75,21 @@ test_roundtrip_TxBody_get_make =
 normalizeOriginal :: TxBodyContent ViewTx era -> TxBodyContent ViewTx era
 normalizeOriginal content =
   content
-    { txAuxScripts    = normalizeAuxScripts    $ txAuxScripts    content
-    , txCertificates  = normalizeCertificates  $ txCertificates  content
-    , txIns           = sortOn fst             $ txIns           content
+    { txAuxScripts = normalizeAuxScripts $ txAuxScripts content
+    , txCertificates = normalizeCertificates $ txCertificates content
+    , txIns = sortOn fst $ txIns content
     , txInsCollateral = normalizeInsCollateral $ txInsCollateral content
-    , txMetadata      = normalizeMetadata      $ txMetadata      content
-    , txMintValue     = normalizeMintValue     $ txMintValue     content
-    , txWithdrawals   = normalizeWithdrawals   $ txWithdrawals   content
+    , txMetadata = normalizeMetadata $ txMetadata content
+    , txMintValue = normalizeMintValue $ txMintValue content
+    , txWithdrawals = normalizeWithdrawals $ txWithdrawals content
     }
 
 -- | Normalizations applied to roundtrip result data only
 normalizeRoundtrip :: TxBodyContent ViewTx era -> TxBodyContent ViewTx era
 normalizeRoundtrip content@TxBodyContent{txAuxScripts, txIns, txInsCollateral} =
   content
-    { txAuxScripts    = normalizeAuxScripts    txAuxScripts
-    , txIns           = sortOn fst             txIns
+    { txAuxScripts = normalizeAuxScripts txAuxScripts
+    , txIns = sortOn fst txIns
     , txInsCollateral = normalizeInsCollateral txInsCollateral
     }
 
@@ -109,14 +109,14 @@ normalizeInsCollateral = \case
 normalizeMetadata :: TxMetadataInEra era -> TxMetadataInEra era
 normalizeMetadata = \case
   TxMetadataInEra _ (TxMetadata m) | null m -> TxMetadataNone
-  other                                     -> other
+  other -> other
 
 -- | Unify empty and None.
 -- Upgrade script versions (see Upgrading scripts section).
 -- Stabilize order of scripts sorting them by language.
 normalizeAuxScripts :: TxAuxScripts era -> TxAuxScripts era
 normalizeAuxScripts = \case
-  TxAuxScripts _       []      -> TxAuxScriptsNone
+  TxAuxScripts _ [] -> TxAuxScriptsNone
   TxAuxScripts support scripts ->
     -- sorting uses script versions, hence sort after upgrade
     TxAuxScripts support $
@@ -131,19 +131,19 @@ languageOfScriptInEra (ScriptInEra lang _) =
 normalizeWithdrawals :: TxWithdrawals ViewTx era -> TxWithdrawals ViewTx era
 normalizeWithdrawals = \case
   TxWithdrawals _ [] -> TxWithdrawalsNone
-  other              -> other
+  other -> other
 
 -- | Unify empty and None.
 normalizeCertificates :: TxCertificates ViewTx era -> TxCertificates ViewTx era
 normalizeCertificates = \case
   TxCertificates _ [] _ -> TxCertificatesNone
-  other                 -> other
+  other -> other
 
 -- | Unify empty and None.
 normalizeMintValue :: TxMintValue ViewTx era -> TxMintValue ViewTx era
 normalizeMintValue = \case
   TxMintValue _ v _ | v == mempty -> TxMintNone
-  other                           -> other
+  other -> other
 
 
 -- * Ugrading scripts
@@ -171,9 +171,9 @@ upgradeSimpleScript ::
   SimpleScript SimpleScriptV1 -> SimpleScript SimpleScriptV2
 upgradeSimpleScript = \case
   RequireSignature hash -> RequireSignature hash
-  RequireAllOf scripts  -> RequireAllOf $ map upgradeSimpleScript scripts
-  RequireAnyOf scripts  -> RequireAnyOf $ map upgradeSimpleScript scripts
-  RequireMOf n scripts  -> RequireMOf n $ map upgradeSimpleScript scripts
+  RequireAllOf scripts -> RequireAllOf $ map upgradeSimpleScript scripts
+  RequireAnyOf scripts -> RequireAnyOf $ map upgradeSimpleScript scripts
+  RequireMOf n scripts -> RequireMOf n $ map upgradeSimpleScript scripts
 
 
 -- * View: Change 'TxBodyContent' “phase” to 'ViewTx'
@@ -183,31 +183,31 @@ upgradeSimpleScript = \case
 viewBodyContent :: TxBodyContent BuildTx era -> TxBodyContent ViewTx era
 viewBodyContent body =
   TxBodyContent
-    { txAuxScripts      =                    txAuxScripts     body
-    , txCertificates    = viewCertificates $ txCertificates   body
-    , txExtraKeyWits    =                    txExtraKeyWits   body
+    { txAuxScripts = txAuxScripts body
+    , txCertificates = viewCertificates $ txCertificates body
+    , txExtraKeyWits = txExtraKeyWits body
     , txExtraScriptData = ViewTx
-    , txFee             =                    txFee            body
-    , txIns             = map viewTxIn     $ txIns            body
-    , txInsCollateral   =                    txInsCollateral  body
-    , txMetadata        =                    txMetadata       body
-    , txMintValue       = viewMintValue    $ txMintValue      body
-    , txOuts            =                    txOuts           body
-    , txProtocolParams  = ViewTx
-    , txScriptValidity  =                    txScriptValidity body
-    , txUpdateProposal  =                    txUpdateProposal body
-    , txValidityRange   =                    txValidityRange  body
-    , txWithdrawals     = viewWithdrawals  $ txWithdrawals    body
+    , txFee = txFee body
+    , txIns = map viewTxIn $ txIns body
+    , txInsCollateral = txInsCollateral body
+    , txMetadata = txMetadata body
+    , txMintValue = viewMintValue $ txMintValue body
+    , txOuts = txOuts body
+    , txProtocolParams = ViewTx
+    , txScriptValidity = txScriptValidity body
+    , txUpdateProposal = txUpdateProposal body
+    , txValidityRange = txValidityRange body
+    , txWithdrawals = viewWithdrawals $ txWithdrawals body
     }
 
 viewTxIn ::
   (TxIn, BuildTxWith BuildTx (Witness WitCtxTxIn era)) ->
-  (TxIn, BuildTxWith ViewTx  (Witness WitCtxTxIn era))
+  (TxIn, BuildTxWith ViewTx (Witness WitCtxTxIn era))
 viewTxIn = second $ const ViewTx
 
 viewWithdrawals :: TxWithdrawals BuildTx era -> TxWithdrawals ViewTx era
 viewWithdrawals = \case
-  TxWithdrawalsNone                 -> TxWithdrawalsNone
+  TxWithdrawalsNone -> TxWithdrawalsNone
   TxWithdrawals support withdrawals ->
     TxWithdrawals
       support
@@ -215,13 +215,13 @@ viewWithdrawals = \case
 
 viewCertificates :: TxCertificates BuildTx era -> TxCertificates ViewTx era
 viewCertificates = \case
-  TxCertificatesNone                    -> TxCertificatesNone
+  TxCertificatesNone -> TxCertificatesNone
   TxCertificates support certificates _ ->
     TxCertificates support certificates ViewTx
 
 viewMintValue :: TxMintValue BuildTx era -> TxMintValue ViewTx era
 viewMintValue = \case
-  TxMintNone                  -> TxMintNone
+  TxMintNone -> TxMintNone
   TxMintValue support value _ -> TxMintValue support value ViewTx
 
 
@@ -233,31 +233,31 @@ viewMintValue = \case
 buildBodyContent :: TxBodyContent ViewTx era -> TxBodyContent BuildTx era
 buildBodyContent body =
   TxBodyContent
-    { txAuxScripts      =                     txAuxScripts     body
-    , txCertificates    = buildCertificates $ txCertificates   body
-    , txExtraKeyWits    =                     txExtraKeyWits   body
+    { txAuxScripts = txAuxScripts body
+    , txCertificates = buildCertificates $ txCertificates body
+    , txExtraKeyWits = txExtraKeyWits body
     , txExtraScriptData = BuildTxWith TxExtraScriptDataNone
-    , txFee             =                     txFee            body
-    , txIns             = map buildTxIn     $ txIns            body
-    , txInsCollateral   =                     txInsCollateral  body
-    , txMetadata        =                     txMetadata       body
-    , txMintValue       = buildMintValue    $ txMintValue      body
-    , txOuts            =                     txOuts           body
-    , txProtocolParams  = BuildTxWith Nothing
-    , txUpdateProposal  =                     txUpdateProposal body
-    , txScriptValidity  =                     txScriptValidity body
-    , txValidityRange   =                     txValidityRange  body
-    , txWithdrawals     = buildWithdrawals  $ txWithdrawals    body
+    , txFee = txFee body
+    , txIns = map buildTxIn $ txIns body
+    , txInsCollateral = txInsCollateral body
+    , txMetadata = txMetadata body
+    , txMintValue = buildMintValue $ txMintValue body
+    , txOuts = txOuts body
+    , txProtocolParams = BuildTxWith Nothing
+    , txUpdateProposal = txUpdateProposal body
+    , txScriptValidity = txScriptValidity body
+    , txValidityRange = txValidityRange body
+    , txWithdrawals = buildWithdrawals $ txWithdrawals body
     }
 
 buildTxIn ::
-  (TxIn, BuildTxWith ViewTx  (Witness WitCtxTxIn era)) ->
+  (TxIn, BuildTxWith ViewTx (Witness WitCtxTxIn era)) ->
   (TxIn, BuildTxWith BuildTx (Witness WitCtxTxIn era))
 buildTxIn = second $ const $ BuildTxWith $ KeyWitness KeyWitnessForSpending
 
 buildWithdrawals :: TxWithdrawals ViewTx era -> TxWithdrawals BuildTx era
 buildWithdrawals = \case
-  TxWithdrawalsNone                 -> TxWithdrawalsNone
+  TxWithdrawalsNone -> TxWithdrawalsNone
   TxWithdrawals support withdrawals ->
     TxWithdrawals
       support
@@ -270,13 +270,13 @@ buildWithdrawals = \case
 
 buildCertificates :: TxCertificates ViewTx era -> TxCertificates BuildTx era
 buildCertificates = \case
-  TxCertificatesNone                    -> TxCertificatesNone
+  TxCertificatesNone -> TxCertificatesNone
   TxCertificates support certificates _ ->
     TxCertificates support certificates (BuildTxWith mempty)
 
 buildMintValue :: TxMintValue ViewTx era -> TxMintValue BuildTx era
 buildMintValue = \case
-  TxMintNone                  -> TxMintNone
+  TxMintNone -> TxMintNone
   TxMintValue support value _ -> TxMintValue support value $ BuildTxWith mempty
 
 
