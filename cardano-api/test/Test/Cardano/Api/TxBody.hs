@@ -14,8 +14,9 @@ import           Test.Tasty.Hedgehog (testProperty)
 import           Test.Tasty.TH (testGroupGenerator)
 
 import           Cardano.Api
+import           Cardano.Api.Shelley (ProtocolParameters)
 
-import           Gen.Cardano.Api.Typed (genTxBody, genTxBodyContent)
+import           Gen.Cardano.Api.Typed (genTxBody', genTxBodyContent)
 
 
 -- * Properties
@@ -53,11 +54,11 @@ test_roundtrip_TxBody_get_make :: [TestTree]
 test_roundtrip_TxBody_get_make =
   [ testProperty (show era) $
     property $ do
-      txbody <- forAll $ genTxBody era
+      (protocolParams, txbody) <- forAll $ genTxBody' era
       tripping
         txbody
         (\(TxBody content) -> content)
-        (makeTransactionBody . buildBodyContent)
+        (makeTransactionBody . buildBodyContent protocolParams)
   | AnyCardanoEra era <- [minBound..]
   ]
 
@@ -186,7 +187,6 @@ viewBodyContent body =
     { txAuxScripts = txAuxScripts body
     , txCertificates = viewCertificates $ txCertificates body
     , txExtraKeyWits = txExtraKeyWits body
-    , txExtraScriptData = ViewTx
     , txFee = txFee body
     , txIns = map viewTxIn $ txIns body
     , txInsCollateral = txInsCollateral body
@@ -230,20 +230,22 @@ viewMintValue = \case
 -- Here we make up the most trivial witnesses or plug holes with 'panic'
 -- to make sure the fields are not touched.
 
-buildBodyContent :: TxBodyContent ViewTx era -> TxBodyContent BuildTx era
-buildBodyContent body =
+buildBodyContent ::
+  BuildTxWith BuildTx (Maybe ProtocolParameters) ->
+  TxBodyContent ViewTx era ->
+  TxBodyContent BuildTx era
+buildBodyContent protocolParams body =
   TxBodyContent
     { txAuxScripts = txAuxScripts body
     , txCertificates = buildCertificates $ txCertificates body
     , txExtraKeyWits = txExtraKeyWits body
-    , txExtraScriptData = BuildTxWith TxExtraScriptDataNone
     , txFee = txFee body
     , txIns = map buildTxIn $ txIns body
     , txInsCollateral = txInsCollateral body
     , txMetadata = txMetadata body
     , txMintValue = buildMintValue $ txMintValue body
     , txOuts = txOuts body
-    , txProtocolParams = BuildTxWith Nothing
+    , txProtocolParams = protocolParams
     , txUpdateProposal = txUpdateProposal body
     , txScriptValidity = txScriptValidity body
     , txValidityRange = txValidityRange body
