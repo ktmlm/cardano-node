@@ -1,20 +1,28 @@
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Test.Cardano.Api.TxBody (tests) where
+module Test.Cardano.Api.TxBody (tests, annotateShow') where
 
 import           Cardano.Prelude
+import qualified Prelude
 
-import           Hedgehog (forAll, property, tripping)
+import qualified Data.Text as Text
+import           Data.Type.Equality (testEquality)
+import           Hedgehog (MonadTest, Property, PropertyT, annotateShow, discard, evalEither,
+                   forAll, property, tripping, (===))
 import           Test.Tasty (TestTree, testGroup)
 import           Test.Tasty.Hedgehog (testProperty)
 import           Test.Tasty.TH (testGroupGenerator)
 
+import           Cardano.Ledger.Alonzo.Data (AuxiliaryData (AuxiliaryData))
+
 import           Cardano.Api
-import           Cardano.Api.Shelley (ProtocolParameters)
+import           Cardano.Api.Shelley (ProtocolParameters, TxBody (ShelleyTxBody))
 
 import           Gen.Cardano.Api.Typed (genTxBody', genTxBodyContent)
 
@@ -34,12 +42,44 @@ test_roundtrip_TxBody_make_get =
   [ testProperty (show era) $
     property $ do
       content <- forAll $ genTxBodyContent era
-      tripping
+      tripping'
         (normalizeOriginal $ viewBodyContent content)
         (\_ -> makeTransactionBody content)
         (<&> \(TxBody content') -> normalizeRoundtrip content')
   | AnyCardanoEra era <- [minBound..]
   ]
+
+prop_AuxScriptsOrder :: Property
+prop_AuxScriptsOrder =
+  property $ do
+    content <- forAll $ genTxBodyContent era
+    let TxBodyContent{txAuxScripts = scripts_o} = content
+    annotateShow scripts_o
+
+    intermediate <- evalEither $ makeTransactionBody content
+    let
+      ShelleyTxBody
+        ShelleyBasedEraAlonzo
+        _constr
+        _someList
+        _scriptData
+        aux
+        _scriptValidity
+        =
+          intermediate
+    scripts_i <-
+      case aux of
+        Nothing -> discard
+        Just (AuxiliaryData _metadata scripts_i) -> pure scripts_i
+    annotateShow scripts_i
+
+    let TxBody roundtrip = intermediate
+    let TxBodyContent{txAuxScripts = scripts_r} = roundtrip
+
+    normalizeAuxScripts scripts_o === normalizeAuxScripts scripts_r
+
+  where
+    era = AlonzoEra
 
 -- | Check that conversion from 'TxBody' to 'TxBodyContent' and back gives
 -- result equivalent to original.
@@ -55,7 +95,7 @@ test_roundtrip_TxBody_get_make =
   [ testProperty (show era) $
     property $ do
       (protocolParams, txbody) <- forAll $ genTxBody' era
-      tripping
+      tripping'
         txbody
         (\(TxBody content) -> content)
         (makeTransactionBody . buildBodyContent protocolParams)
@@ -72,9 +112,9 @@ test_roundtrip_TxBody_get_make =
 -- Input data also may be generated as either @Just 0@ or @Nothing@.
 -- Order of some items may also change, they need to be reordered.
 
--- | Normalizations applied to original data only
-normalizeOriginal :: TxBodyContent ViewTx era -> TxBodyContent ViewTx era
-normalizeOriginal content =
+-- | Normalizations applied to original body content
+normalizeContentOriginal :: TxBodyContent ViewTx era -> TxBodyContent ViewTx era
+normalizeContentOriginal content =
   content
     { txAuxScripts = normalizeAuxScripts $ txAuxScripts content
     , txCertificates = normalizeCertificates $ txCertificates content
@@ -85,9 +125,10 @@ normalizeOriginal content =
     , txWithdrawals = normalizeWithdrawals $ txWithdrawals content
     }
 
--- | Normalizations applied to roundtrip result data only
-normalizeRoundtrip :: TxBodyContent ViewTx era -> TxBodyContent ViewTx era
-normalizeRoundtrip content@TxBodyContent{txAuxScripts, txIns, txInsCollateral} =
+-- | Normalizations applied to roundtrip result body content
+normalizeContentRoundtrip ::
+  TxBodyContent ViewTx era -> TxBodyContent ViewTx era
+normalizeContentRoundtrip content =
   content
     { txAuxScripts = normalizeAuxScripts txAuxScripts
     , txIns = sortOn fst txIns
@@ -121,12 +162,59 @@ normalizeAuxScripts = \case
   TxAuxScripts support scripts ->
     -- sorting uses script versions, hence sort after upgrade
     TxAuxScripts support $
-    sortOn languageOfScriptInEra $ map upgradeScriptInEra scripts
+    sortBy normalizeScriptInEraOrder $
+    map upgradeScriptInEra scripts
   other -> other
 
-languageOfScriptInEra :: ScriptInEra era -> AnyScriptLanguage
-languageOfScriptInEra (ScriptInEra lang _) =
-  AnyScriptLanguage $ languageOfScriptLanguageInEra lang
+normalizeScriptInEraOrder :: ScriptInEra era -> ScriptInEra era -> Ordering
+normalizeScriptInEraOrder
+  (ScriptInEra slang1 script1)
+  (ScriptInEra slang2 script2) =
+    case testEquality lang1 lang2 of
+      Nothing -> compare (AnyScriptLanguage lang1) (AnyScriptLanguage lang2)
+      Just Refl -> normalizeScriptOrder script1 script2
+    where
+      lang1 = languageOfScriptLanguageInEra slang1
+      lang2 = languageOfScriptLanguageInEra slang2
+
+normalizeScriptOrder :: Script lang -> Script lang -> Ordering
+normalizeScriptOrder =
+  curry $ \case
+    (SimpleScript _ s1, SimpleScript _ s2) -> normalizeSimpleScriptOrder s1 s2
+    (SimpleScript{}, PlutusScript{}) -> LT
+    (PlutusScript{}, SimpleScript{}) -> GT
+    (PlutusScript v1 s1, PlutusScript v2 s2) ->
+      compare (AnyPlutusScriptVersion v1) (AnyPlutusScriptVersion v2)
+      <> compare s1 s2
+
+normalizeSimpleScriptOrder :: SimpleScript lang -> SimpleScript lang -> Ordering
+normalizeSimpleScriptOrder =
+  curry $ \case
+    (RequireAllOf s1, RequireAllOf s2) -> compareList s1 s2
+    (RequireAnyOf s1, RequireAnyOf s2) -> compareList s1 s2
+    (RequireMOf m1 s1, RequireMOf m2 s2) -> compare m1 m2 <> compareList s1 s2
+    (RequireSignature s1, RequireSignature s2) -> compare s1 s2
+    (RequireTimeBefore _ s1, RequireTimeBefore _ s2) -> compare s1 s2
+    (RequireTimeAfter _ s1, RequireTimeAfter _ s2) -> compare s1 s2
+    (s1, s2) -> compare (consNum s1) (consNum s2)
+  where
+
+    consNum :: SimpleScript lang -> Int
+    consNum = \case
+      RequireAllOf{} -> 0
+      RequireAnyOf{} -> 1
+      RequireMOf{} -> 2
+      RequireSignature{} -> 3
+      RequireTimeAfter{} -> 4
+      RequireTimeBefore{} -> 5
+
+    compareList = \case
+      [] -> \case
+        [] -> EQ
+        _ -> LT
+      x:xs -> \case
+        [] -> GT
+        y:ys -> normalizeSimpleScriptOrder x y <> compareList xs ys
 
 -- | Unify empty and None.
 normalizeWithdrawals :: TxWithdrawals ViewTx era -> TxWithdrawals ViewTx era
@@ -284,3 +372,30 @@ buildMintValue = \case
 
 tests :: TestTree
 tests = $testGroupGenerator
+
+
+-- | hack to work around https://github.com/input-output-hk/cardano-ledger-specs/pull/2529
+newtype Show' a = Show' a
+  deriving newtype Eq
+
+instance Show a => Show (Show' a) where
+  show (Show' a) = Text.unpack $ Text.replace " data: " " data_= " $ show a
+
+unwrapShow' :: Show' a -> a
+unwrapShow' (Show' a) = a
+
+tripping' ::
+  ( MonadTest m
+  , Applicative f
+  , Show b, Show (f (Show' a)), Eq (f (Show' a))
+  , HasCallStack
+  ) =>
+  a -> (a -> b) -> (b -> f a) -> m ()
+tripping' x encode decode =
+  tripping
+    (Show' x)
+    (Show' . encode . unwrapShow')
+    (fmap Show' . decode . unwrapShow')
+
+annotateShow' :: (Show a, HasCallStack) => a -> PropertyT IO ()
+annotateShow' = annotateShow . Show'

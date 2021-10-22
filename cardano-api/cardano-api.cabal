@@ -195,6 +195,7 @@ test-suite cardano-api-test
                       , cardano-crypto-class
                       , cardano-crypto-test
                       , cardano-crypto-tests
+                      , cardano-ledger-alonzo
                       , cardano-ledger-core
                       , cardano-prelude
                       , cardano-slotting
@@ -210,6 +211,7 @@ test-suite cardano-api-test
                       , tasty-hedgehog
                       , tasty-quickcheck
                       , tasty-th
+                      , text
                       , time
 
   other-modules:        Test.Cardano.Api.Crypto
