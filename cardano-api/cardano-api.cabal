@@ -197,6 +197,8 @@ test-suite cardano-api-test
                       , cardano-crypto-tests
                       , cardano-ledger-alonzo
                       , cardano-ledger-core
+                      , cardano-ledger-shelley
+                      , cardano-ledger-shelley-test
                       , cardano-prelude
                       , cardano-slotting
                       , containers
@@ -205,8 +207,7 @@ test-suite cardano-api-test
                       , ouroboros-consensus
                       , ouroboros-consensus-shelley
                       , QuickCheck
-                      , cardano-ledger-shelley
-                      , cardano-ledger-shelley-test
+                      , strict-containers
                       , tasty
                       , tasty-hedgehog
                       , tasty-quickcheck

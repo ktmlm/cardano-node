@@ -1,4 +1,6 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralisedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
@@ -6,20 +8,20 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Test.Cardano.Api.TxBody (tests, annotateShow') where
+module Test.Cardano.Api.TxBody (tests) where
 
 import           Cardano.Prelude
-import qualified Prelude
 
-import qualified Data.Text as Text
 import           Data.Type.Equality (testEquality)
-import           Hedgehog (MonadTest, Property, PropertyT, annotateShow, discard, evalEither,
-                   forAll, property, tripping, (===))
+import           Hedgehog (PropertyT, evalEither, forAll, property, tripping, (===))
 import           Test.Tasty (TestTree, testGroup)
 import           Test.Tasty.Hedgehog (testProperty)
 import           Test.Tasty.TH (testGroupGenerator)
 
 import           Cardano.Ledger.Alonzo.Data (AuxiliaryData (AuxiliaryData))
+import           Cardano.Ledger.Alonzo.TxBody (adHash)
+import           Data.Maybe.Strict (StrictMaybe (SNothing))
+import           Ouroboros.Consensus.Shelley.Eras as Ledger (StandardAlonzo)
 
 import           Cardano.Api
 import           Cardano.Api.Shelley (ProtocolParameters, TxBody (ShelleyTxBody))
@@ -42,44 +44,13 @@ test_roundtrip_TxBody_make_get =
   [ testProperty (show era) $
     property $ do
       content <- forAll $ genTxBodyContent era
-      tripping'
-        (normalizeOriginal $ viewBodyContent content)
+      tripping
+        (normalizeContentOriginal $ viewBodyContent content)
         (\_ -> makeTransactionBody content)
-        (<&> \(TxBody content') -> normalizeRoundtrip content')
+        (<&> \(TxBody content') -> normalizeContentRoundtrip content')
   | AnyCardanoEra era <- [minBound..]
   ]
 
-prop_AuxScriptsOrder :: Property
-prop_AuxScriptsOrder =
-  property $ do
-    content <- forAll $ genTxBodyContent era
-    let TxBodyContent{txAuxScripts = scripts_o} = content
-    annotateShow scripts_o
-
-    intermediate <- evalEither $ makeTransactionBody content
-    let
-      ShelleyTxBody
-        ShelleyBasedEraAlonzo
-        _constr
-        _someList
-        _scriptData
-        aux
-        _scriptValidity
-        =
-          intermediate
-    scripts_i <-
-      case aux of
-        Nothing -> discard
-        Just (AuxiliaryData _metadata scripts_i) -> pure scripts_i
-    annotateShow scripts_i
-
-    let TxBody roundtrip = intermediate
-    let TxBodyContent{txAuxScripts = scripts_r} = roundtrip
-
-    normalizeAuxScripts scripts_o === normalizeAuxScripts scripts_r
-
-  where
-    era = AlonzoEra
 
 -- | Check that conversion from 'TxBody' to 'TxBodyContent' and back gives
 -- result equivalent to original.
@@ -94,13 +65,45 @@ test_roundtrip_TxBody_get_make :: [TestTree]
 test_roundtrip_TxBody_get_make =
   [ testProperty (show era) $
     property $ do
-      (protocolParams, txbody) <- forAll $ genTxBody' era
-      tripping'
-        txbody
-        (\(TxBody content) -> content)
-        (makeTransactionBody . buildBodyContent protocolParams)
+      (protocolParams, body) <- forAll $ genTxBody' era
+      let TxBody content = body
+      body' <-
+        evalEither $
+        makeTransactionBody $ buildBodyContent protocolParams content
+      assertEqBodies body body'
   | AnyCardanoEra era <- [minBound..]
   ]
+
+
+assertEqBodies :: TxBody era -> TxBody era -> PropertyT IO ()
+assertEqBodies x y =
+  case (x, y) of
+    ( ShelleyTxBody ShelleyBasedEraAlonzo xBody xs xd (Just xAux) xv,
+      ShelleyTxBody ShelleyBasedEraAlonzo yBody ys yd (Just yAux) yv
+      ) -> do
+        -- compare aux data separately from the rest
+        assertEqAuxData xAux yAux
+        x' === y'
+        where
+          xAux' = Nothing
+          yAux' = Nothing
+          xBody' = xBody {adHash = SNothing}
+          yBody' = yBody {adHash = SNothing}
+          x' = ShelleyTxBody ShelleyBasedEraAlonzo xBody' xs xd xAux' xv
+          y' = ShelleyTxBody ShelleyBasedEraAlonzo yBody' ys yd yAux' yv
+    _ -> x === y
+
+-- | Compare ignoring scripts order
+assertEqAuxData ::
+  AuxiliaryData Ledger.StandardAlonzo ->
+  AuxiliaryData Ledger.StandardAlonzo ->
+  PropertyT IO ()
+assertEqAuxData
+  (AuxiliaryData xMetadata xScripts)
+  (AuxiliaryData yMetadata yScripts) = do
+    when (sort (toList xScripts) /= sort (toList yScripts)) $
+      xScripts === yScripts
+    xMetadata === yMetadata
 
 
 -- * Normalization
@@ -130,9 +133,9 @@ normalizeContentRoundtrip ::
   TxBodyContent ViewTx era -> TxBodyContent ViewTx era
 normalizeContentRoundtrip content =
   content
-    { txAuxScripts = normalizeAuxScripts txAuxScripts
-    , txIns = sortOn fst txIns
-    , txInsCollateral = normalizeInsCollateral txInsCollateral
+    { txAuxScripts = normalizeAuxScripts $ txAuxScripts content
+    , txIns = sortOn fst $ txIns content
+    , txInsCollateral = normalizeInsCollateral $ txInsCollateral content
     }
 
 -- | Original data: Unify empty and None.
@@ -190,9 +193,9 @@ normalizeScriptOrder =
 normalizeSimpleScriptOrder :: SimpleScript lang -> SimpleScript lang -> Ordering
 normalizeSimpleScriptOrder =
   curry $ \case
-    (RequireAllOf s1, RequireAllOf s2) -> compareList s1 s2
-    (RequireAnyOf s1, RequireAnyOf s2) -> compareList s1 s2
-    (RequireMOf m1 s1, RequireMOf m2 s2) -> compare m1 m2 <> compareList s1 s2
+    (RequireAllOf s1, RequireAllOf s2) -> normList s1 s2
+    (RequireAnyOf s1, RequireAnyOf s2) -> normList s1 s2
+    (RequireMOf m1 s1, RequireMOf m2 s2) -> compare m1 m2 <> normList s1 s2
     (RequireSignature s1, RequireSignature s2) -> compare s1 s2
     (RequireTimeBefore _ s1, RequireTimeBefore _ s2) -> compare s1 s2
     (RequireTimeAfter _ s1, RequireTimeAfter _ s2) -> compare s1 s2
@@ -208,13 +211,14 @@ normalizeSimpleScriptOrder =
       RequireTimeAfter{} -> 4
       RequireTimeBefore{} -> 5
 
-    compareList = \case
+    normList :: [SimpleScript lang] -> [SimpleScript lang] -> Ordering
+    normList = \case
       [] -> \case
         [] -> EQ
         _ -> LT
       x:xs -> \case
-        [] -> GT
-        y:ys -> normalizeSimpleScriptOrder x y <> compareList xs ys
+        []   -> GT
+        y:ys -> normalizeSimpleScriptOrder x y <> normList xs ys
 
 -- | Unify empty and None.
 normalizeWithdrawals :: TxWithdrawals ViewTx era -> TxWithdrawals ViewTx era
@@ -372,30 +376,3 @@ buildMintValue = \case
 
 tests :: TestTree
 tests = $testGroupGenerator
-
-
--- | hack to work around https://github.com/input-output-hk/cardano-ledger-specs/pull/2529
-newtype Show' a = Show' a
-  deriving newtype Eq
-
-instance Show a => Show (Show' a) where
-  show (Show' a) = Text.unpack $ Text.replace " data: " " data_= " $ show a
-
-unwrapShow' :: Show' a -> a
-unwrapShow' (Show' a) = a
-
-tripping' ::
-  ( MonadTest m
-  , Applicative f
-  , Show b, Show (f (Show' a)), Eq (f (Show' a))
-  , HasCallStack
-  ) =>
-  a -> (a -> b) -> (b -> f a) -> m ()
-tripping' x encode decode =
-  tripping
-    (Show' x)
-    (Show' . encode . unwrapShow')
-    (fmap Show' . decode . unwrapShow')
-
-annotateShow' :: (Show a, HasCallStack) => a -> PropertyT IO ()
-annotateShow' = annotateShow . Show'
