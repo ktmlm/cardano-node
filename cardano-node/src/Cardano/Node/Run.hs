@@ -96,7 +96,8 @@ runNode cmdPc = do
             Right nc' -> return nc'
 
     putStrLn $ "Node configuration: " <> show @_ @Text nc
-
+    putStrLn $ "IPC config: " <> (show (ncShutdownIPC nc) :: String)
+    putStrLn $ "From cli" <> (show (pncShutdownIPC cmdPc) :: String)
     case shelleyVRFFile $ ncProtocolFiles nc of
       Just vrfFp -> do vrf <- runExceptT $ checkVRFFilePermissions vrfFp
                        case vrf of
@@ -126,7 +127,8 @@ runNode cmdPc = do
     let tracer = contramap pack $ toLogObject trace
 
     logTracingVerbosity nc tracer
-
+    meta <- mkLOMeta Notice Public
+    traceNamedObject trace (meta, LogMessage "After logTracingVerbosity")
     let handleNodeWithTracers
           :: ( HasKESMetricsData blk
              , HasKESInfo blk
@@ -146,6 +148,7 @@ runNode cmdPc = do
                        trace
                        nodeKernelData
                        (llEKGDirect loggingLayer)
+          traceWith tracer "Before withAsync"
           Async.withAsync (handlePeersListSimple trace nodeKernelData)
               $ \_peerLogingThread ->
                 -- We ignore peer loging thread if it dies, but it will be killed
@@ -273,7 +276,7 @@ handleSimpleNode scp runP trace nodeTracers nc onKernel = do
     (appendName "ip-producers" trace)
     (meta, LogMessage . Text.pack . show $ ipProducers)
 
-  withShutdownHandling nc trace $ \sfds ->
+  withShutdownHandling (ncShutdownIPC nc) trace $
    Node.run
      RunNodeArgs
        { rnTraceConsensus = consensusTracers nodeTracers
@@ -281,7 +284,7 @@ handleSimpleNode scp runP trace nodeTracers nc onKernel = do
        , rnTraceNTC       = nodeToClientTracers nodeTracers
        , rnProtocolInfo   = pInfo
        , rnNodeKernelHook = \registry nodeKernel -> do
-           maybeSpawnOnSlotSyncedShutdownHandler nc sfds trace registry
+           maybeSpawnOnSlotSyncedShutdownHandler nc trace registry
              (Node.getChainDB nodeKernel)
            onKernel nodeKernel
        }
