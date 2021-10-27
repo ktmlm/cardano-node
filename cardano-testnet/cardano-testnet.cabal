@@ -36,6 +36,8 @@ library
   build-depends:        aeson
                       , base16-bytestring
                       , bytestring
+                      , cardano-api
+                      , cardano-cli
                       , containers
                       , directory
                       , exceptions
@@ -47,6 +49,7 @@ library
                       , process
                       , random
                       , resourcet
+                      , safe-exceptions
                       , text
                       , time
                       , unordered-containers
@@ -61,6 +64,7 @@ library
                         Testnet.List
                         Testnet.Shelley
                         Testnet.SubmitApi
+                        Testnet.Utils
 
 executable cardano-testnet
   import:               base, project-config
@@ -102,6 +106,7 @@ test-suite cardano-testnet-tests
 
   build-depends:        aeson
                       , cardano-api
+                      , cardano-cli
                       , cardano-testnet
                       , containers
                       , directory
@@ -113,7 +118,8 @@ test-suite cardano-testnet-tests
                       , text
                       , unordered-containers
 
-  other-modules:        Spec.Plutus.Direct.ScriptContextEquality
+  other-modules:        Spec.Plutus.Direct.CertifyingAndWithdrawingPlutus
+                        Spec.Plutus.Direct.ScriptContextEquality
                         Spec.Plutus.Direct.ScriptContextEqualityMint
                         Spec.Plutus.Direct.TxInLockingPlutus
                         Spec.Plutus.Script.TxInLockingPlutus
