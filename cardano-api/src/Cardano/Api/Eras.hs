@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -45,14 +46,12 @@ module Cardano.Api.Eras
 
 import           Prelude
 
-import           Data.Aeson (ToJSON, toJSON)
+import           Data.Aeson (FromJSON (..), ToJSON, toJSON, withText)
+import qualified Data.Text as Text
 import           Data.Type.Equality (TestEquality (..), (:~:) (Refl))
 
-import           Ouroboros.Consensus.Shelley.Eras as Ledger
-                   (StandardShelley,
-                    StandardAllegra,
-                    StandardMary,
-                    StandardAlonzo)
+import           Ouroboros.Consensus.Shelley.Eras as Ledger (StandardAllegra, StandardAlonzo,
+                   StandardMary, StandardShelley)
 
 import           Cardano.Api.HasTypeProxy
 
@@ -202,6 +201,17 @@ instance Eq AnyCardanoEra where
 
 instance ToJSON AnyCardanoEra where
    toJSON (AnyCardanoEra era) = toJSON era
+
+instance FromJSON AnyCardanoEra where
+   parseJSON = withText "AnyCardanoEra"
+     $ \case
+        "Byron" -> pure $ AnyCardanoEra ByronEra
+        "Shelley" -> pure $ AnyCardanoEra ShelleyEra
+        "Allegra" -> pure $ AnyCardanoEra AllegraEra
+        "Mary" -> pure $ AnyCardanoEra MaryEra
+        "Alonzo" -> pure $ AnyCardanoEra AlonzoEra
+        wrong -> fail $ "Failed to parse unknown era: " <> Text.unpack wrong
+
 
 -- | Like the 'AnyCardanoEra' constructor but does not demand a 'IsCardanoEra'
 -- class constraint.
