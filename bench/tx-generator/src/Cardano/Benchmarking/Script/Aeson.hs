@@ -1,35 +1,35 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 module Cardano.Benchmarking.Script.Aeson
 where
 
-import           Prelude
-import           System.Exit
-import           Data.Functor.Identity
-import           Data.Text (Text)
-import qualified Data.Text as Text
-import           Data.Dependent.Sum
-import qualified Data.HashMap.Strict as HashMap (toList, lookup)
-import qualified Data.ByteString.Lazy as BSL
+import           Data.Aeson
+import           Data.Aeson.Encode.Pretty
+import           Data.Aeson.Types
+import qualified Data.Attoparsec.ByteString as Atto
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BS (lines)
-import           Data.Aeson
-import           Data.Aeson.Types
-import           Data.Aeson.Encode.Pretty
-import qualified Data.Attoparsec.ByteString as Atto
+import qualified Data.ByteString.Lazy as BSL
+import           Data.Dependent.Sum
+import           Data.Functor.Identity
+import qualified Data.HashMap.Strict as HashMap (lookup, toList)
+import           Data.Text (Text)
+import qualified Data.Text as Text
+import           Prelude
+import           System.Exit
 
-import           Cardano.Api (AnyCardanoEra(..), CardanoEra(..), ScriptData, ScriptDataJsonSchema(..), scriptDataFromJson, scriptDataToJson)
-import           Cardano.CLI.Types (SigningKeyFile(..))
+import           Cardano.Api (ScriptData, ScriptDataJsonSchema (..), scriptDataFromJson,
+                   scriptDataToJson)
+import           Cardano.CLI.Types (SigningKeyFile (..))
 
 import           Cardano.Benchmarking.Script.Env
 import           Cardano.Benchmarking.Script.Setters
 import           Cardano.Benchmarking.Script.Store
 import           Cardano.Benchmarking.Script.Types
-import           Cardano.Benchmarking.Types (NumberOfTxs(..), TPSRate(..))
+import           Cardano.Benchmarking.Types (NumberOfTxs (..), TPSRate (..))
 
 testJSONRoundTrip :: [Action] -> Maybe String
 testJSONRoundTrip l = case fromJSON $ toJSON l of
@@ -46,15 +46,6 @@ prettyPrint = encodePretty' conf
     , "splitFundToList", "delay", "prepareTxList"
     , "runBenchmark", "asyncBenchmark", "waitBenchmark", "cancelBenchmark"
     , "reserved" ]
-
-instance FromJSON AnyCardanoEra where
-  parseJSON = withText "AnyCardanoEra" $ \case
-    "Byron"   -> return $ AnyCardanoEra ByronEra
-    "Shelley" -> return $ AnyCardanoEra ShelleyEra
-    "Allegra" -> return $ AnyCardanoEra AllegraEra
-    "Mary"    -> return $ AnyCardanoEra MaryEra
-    "Alonzo"    -> return $ AnyCardanoEra AlonzoEra
-    era -> parseFail ("Error: Cannot parse JSON value '" <> Text.unpack era <> "' to AnyCardanoEra.")
 
 jsonOptionsUnTaggedSum :: Options
 jsonOptionsUnTaggedSum = defaultOptions { sumEncoding = ObjectWithSingleField }
@@ -111,7 +102,7 @@ actionToJSON a = case a of
   Delay t -> object ["delay" .= t ]
   PrepareTxList (TxListName name) (KeyName key) (FundListName fund)
     -> object ["prepareTxList" .= name, "newKey" .= key, "fundList" .= fund ]
-  AsyncBenchmark (ThreadName t) (TxListName txs) (TPSRate tps) 
+  AsyncBenchmark (ThreadName t) (TxListName txs) (TPSRate tps)
     -> object ["asyncBenchmark" .= t, "txList" .= txs, "tps" .= tps]
   ImportGenesisFund submitMode (KeyName genesisKey) (KeyName fundKey)
     -> object ["importGenesisFund" .= genesisKey, "submitMode" .= submitMode, "fundKey" .= fundKey ]
@@ -203,7 +194,7 @@ objectToAction obj = case obj of
   parseAsyncBenchmark v = AsyncBenchmark
     <$> ( ThreadName <$> parseJSON v )
     <*> ( TxListName <$> parseField obj "txList" )
-    <*> ( TPSRate <$> parseField obj "tps" )   
+    <*> ( TPSRate <$> parseField obj "tps" )
 
   parseRunBenchmark v = RunBenchmark
     <$> parseField obj "submitMode"
