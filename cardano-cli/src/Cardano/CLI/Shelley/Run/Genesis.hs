@@ -60,8 +60,6 @@ import           Ouroboros.Consensus.Shelley.Eras (StandardShelley)
 import           Ouroboros.Consensus.Shelley.Node (ShelleyGenesisStaking (..))
 
 import qualified Cardano.Ledger.Alonzo.Genesis as Alonzo
-import qualified Cardano.Ledger.Alonzo.Language as Alonzo
-import qualified Cardano.Ledger.Alonzo.Scripts as Alonzo
 import qualified Cardano.Ledger.BaseTypes as Ledger
 import           Cardano.Ledger.Coin (Coin (..))
 import qualified Cardano.Ledger.Keys as Ledger
@@ -82,7 +80,6 @@ import           Cardano.CLI.Shelley.Run.Pool (ShelleyPoolCmdError (..), renderS
 import           Cardano.CLI.Shelley.Run.StakeAddress (ShelleyStakeAddressCmdError (..),
                    renderShelleyStakeAddressCmdError, runStakeAddressKeyGen)
 import           Cardano.CLI.Types
-import           Plutus.V1.Ledger.Api (defaultCostModelParams)
 
 {- HLINT ignore "Reduce duplication" -}
 
@@ -341,6 +338,7 @@ runGenesisCreate (GenesisDir rootdir)
     createDirectoryIfMissing False utxodir
 
   template <- readShelleyGenesis (rootdir </> "genesis.spec.json") adjustTemplate
+  alonzoGenesis <- readAlonzoGenesis (rootdir </> "genesis.alonzo.spec.json")
 
   forM_ [ 1 .. genNumGenesisKeys ] $ \index -> do
     createGenesisKeys  gendir  index
@@ -353,19 +351,10 @@ runGenesisCreate (GenesisDir rootdir)
   utxoAddrs <- readInitialFundAddresses utxodir network
   start <- maybe (SystemStart <$> getCurrentTimePlus30) pure mStart
 
-  let (shelleyGenesis, alonzoGenesis) =
+  let shelleyGenesis =
         updateTemplate
           -- Shelley genesis parameters
           start genDlgs mAmount utxoAddrs mempty (Lovelace 0) [] [] template
-          -- Alonzo genesis parameters
-          -- TODO alonzo: parameterize these, don't just use defaults
-          alonzoGenesisDefaultLovelacePerUtxoWord
-          alonzoGenesisDefaultExecutionPrices
-          alonzoGenesisDefaultMaxTxExecutionUnits
-          alonzoGenesisDefaultMaxBlockExecutionUnits
-          alonzoGenesisDefaultMaxValueSize
-          alonzoGenesisDefaultCollateralPercent
-          alonzoGenesisDefaultMaxCollateralInputs
 
   writeFileGenesis (rootdir </> "genesis.json")        shelleyGenesis
   writeFileGenesis (rootdir </> "genesis.alonzo.json") alonzoGenesis
@@ -403,6 +392,7 @@ runGenesisCreateStaked (GenesisDir rootdir)
     createDirectoryIfMissing False utxodir
 
   template <- readShelleyGenesis (rootdir </> "genesis.spec.json") adjustTemplate
+  alonzoGenesis <- readAlonzoGenesis (rootdir </> "genesis.alonzo.spec.json")
 
   forM_ [ 1 .. genNumGenesisKeys ] $ \index -> do
     createGenesisKeys  gendir  index
@@ -450,20 +440,11 @@ runGenesisCreateStaked (GenesisDir rootdir)
   let poolMap :: Map (Ledger.KeyHash Ledger.Staking StandardCrypto) (Ledger.PoolParams StandardCrypto)
       poolMap = Map.fromList $ mkDelegationMapEntry <$> delegations
       delegAddrs = dInitialUtxoAddr <$> delegations
-      (shelleyGenesis, alonzoGenesis) =
+      shelleyGenesis =
         updateTemplate
           -- Shelley genesis parameters
           start genDlgs mNonDlgAmount nonDelegAddrs poolMap
           stDlgAmount delegAddrs stuffedUtxoAddrs template
-          -- Alonzo genesis parameters
-          -- TODO alonzo: parameterize these, don't just use defaults
-          alonzoGenesisDefaultLovelacePerUtxoWord
-          alonzoGenesisDefaultExecutionPrices
-          alonzoGenesisDefaultMaxTxExecutionUnits
-          alonzoGenesisDefaultMaxBlockExecutionUnits
-          alonzoGenesisDefaultMaxValueSize
-          alonzoGenesisDefaultCollateralPercent
-          alonzoGenesisDefaultMaxCollateralInputs
 
   writeFileGenesis (rootdir </> "genesis.json")        shelleyGenesis
   writeFileGenesis (rootdir </> "genesis.alonzo.json") alonzoGenesis
@@ -735,7 +716,6 @@ readShelleyGenesis fpath adjustDefaults = do
         LBS.writeFile fpath (encodePretty defaults)
       return defaults
 
-
 updateTemplate
     :: SystemStart
     -- Genesis delegation (not stake-based):
@@ -749,22 +729,14 @@ updateTemplate
     -> [AddressInEra ShelleyEra]
     -> [AddressInEra ShelleyEra]
     -> ShelleyGenesis StandardShelley
-    -- Alonzo genesis parameters
-    -> Lovelace            -- ^ Ada per UTxO word
-    -> ExecutionUnitPrices -- ^ Execution prices (memory, steps)
-    -> ExecutionUnits      -- ^ Max Tx execution units
-    -> ExecutionUnits      -- ^ Max block execution units
-    -> Natural             -- ^ Max value size
-    -> Natural             -- ^ Collateral percentage
-    -> Natural             -- ^ Max collateral inputs
-    -> (ShelleyGenesis StandardShelley, Alonzo.AlonzoGenesis)
+    -> ShelleyGenesis StandardShelley
 updateTemplate (SystemStart start)
                genDelegMap mAmountNonDeleg utxoAddrsNonDeleg
                poolSpecs (Lovelace amountDeleg) utxoAddrsDeleg stuffedUtxoAddrs
-               template coinsPerUTxOWord prices maxTxExUnits maxBlockExUnits
-               maxValueSize collateralPercentage maxCollateralInputs = do
+               template = do
 
-    let shelleyGenesis = template
+    let pparamsFromTemplate = sgProtocolParams template
+        shelleyGenesis = template
           { sgSystemStart = start
           , sgMaxLovelaceSupply = fromIntegral $ nonDelegCoin + delegCoin
           , sgGenDelegs = shelleyDelKeys
@@ -781,30 +753,9 @@ updateTemplate (SystemStart start)
                             | poolParams <- Map.elems poolSpecs ]
               , sgsStake = Ledger._poolId <$> poolSpecs
               }
+          , sgProtocolParams = pparamsFromTemplate
           }
-        cModel = case Alonzo.CostModel <$> defaultCostModelParams of
-                   Just (Alonzo.CostModel m) ->
-                     if Alonzo.validateCostModelParams m
-                     then Map.singleton Alonzo.PlutusV1 (Alonzo.CostModel m)
-                     else panic "updateTemplate: defaultCostModel is invalid"
-
-                   Nothing -> panic "updateTemplate: Could not extract cost model params from defaultCostModel"
-        --TODO: we need a better validation story. We also ought to wrap the
-        -- genesis type in the API properly.
-        prices' = case toAlonzoPrices prices of
-                    Nothing -> panic "updateTemplate: invalid prices"
-                    Just p  -> p
-        alonzoGenesis = Alonzo.AlonzoGenesis
-          { Alonzo.coinsPerUTxOWord     = toShelleyLovelace coinsPerUTxOWord
-          , Alonzo.costmdls             = cModel
-          , Alonzo.prices               = prices'
-          , Alonzo.maxTxExUnits         = toAlonzoExUnits maxTxExUnits
-          , Alonzo.maxBlockExUnits      = toAlonzoExUnits maxBlockExUnits
-          , Alonzo.maxValSize           = maxValueSize
-          , Alonzo.collateralPercentage = collateralPercentage
-          , Alonzo.maxCollateralInputs  = maxCollateralInputs
-          }
-    (shelleyGenesis, alonzoGenesis)
+    shelleyGenesis
   where
     maximumLovelaceSupply :: Word64
     maximumLovelaceSupply = sgMaxLovelaceSupply template
@@ -999,45 +950,6 @@ runGenesisHashFile (GenesisFile fpath) = do
        gh = Crypto.hashWith id content
    liftIO $ Text.putStrLn (Crypto.hashToTextAsHex gh)
 
---
--- Alonzo genesis
---
-
-
-alonzoGenesisDefaultLovelacePerUtxoWord :: Lovelace
-alonzoGenesisDefaultLovelacePerUtxoWord = Lovelace 1
-
-alonzoGenesisDefaultExecutionPrices :: ExecutionUnitPrices
-alonzoGenesisDefaultExecutionPrices =
-    ExecutionUnitPrices {
-       priceExecutionSteps  = 1 % 10,
-       priceExecutionMemory = 1 % 10
-    }
-
-alonzoGenesisDefaultMaxTxExecutionUnits :: ExecutionUnits
-alonzoGenesisDefaultMaxTxExecutionUnits =
-    ExecutionUnits {
-      executionSteps  = 500_000_000_000,
-      executionMemory = 500_000_000_000
-    }
-
-alonzoGenesisDefaultMaxBlockExecutionUnits :: ExecutionUnits
-alonzoGenesisDefaultMaxBlockExecutionUnits =
-    ExecutionUnits {
-      executionSteps  = 500_000_000_000,
-      executionMemory = 500_000_000_000
-    }
-
-alonzoGenesisDefaultMaxValueSize :: Natural
-alonzoGenesisDefaultMaxValueSize = 4000
-
-alonzoGenesisDefaultCollateralPercent :: Natural
-alonzoGenesisDefaultCollateralPercent = 1 --TODO change to 100%
-
-alonzoGenesisDefaultMaxCollateralInputs :: Natural
-alonzoGenesisDefaultMaxCollateralInputs = 5
-
-
 readAlonzoGenesis
   :: FilePath
   -> ExceptT ShelleyGenesisCmdError IO Alonzo.AlonzoGenesis
@@ -1046,10 +958,18 @@ readAlonzoGenesis fpath = do
     `catchError` \err ->
       case err of
         ShelleyGenesisCmdGenesisFileError (FileIOError _ ioe)
-          | isDoesNotExistError ioe -> panic "Shelley genesis file not found."
+          | isDoesNotExistError ioe -> writeDefault
         _                           -> left err
 
  where
+  defaults :: Alonzo.AlonzoGenesis
+  defaults = alonzoGenesisDefaults
+
+  writeDefault = do
+    handleIOExceptT (ShelleyGenesisCmdGenesisFileError . FileIOError fpath) $
+      LBS.writeFile fpath (encodePretty defaults)
+    return defaults
+
   readAndDecode :: ExceptT ShelleyGenesisCmdError IO Alonzo.AlonzoGenesis
   readAndDecode = do
       lbs <- handleIOExceptT (ShelleyGenesisCmdGenesisFileError . FileIOError fpath) $ LBS.readFile fpath
