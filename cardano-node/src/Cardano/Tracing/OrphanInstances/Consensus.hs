@@ -930,6 +930,7 @@ instance ( ConvertRawHash blk
                ]
     ImmDB.DBAlreadyClosed -> mkObject [ "kind" .= String "TraceImmutableDBEvent.DBAlreadyClosed" ]
     ImmDB.DBClosed -> mkObject [ "kind" .= String "TraceImmutableDBEvent.DBClosed" ]
+    ImmDB.DBOpened -> mkObject [ "kind" .= String "TraceImmutableDBEvent.DBOpened" ]
     ImmDB.TraceCacheEvent cacheEv ->
       case cacheEv of
         ImmDB.TraceCurrentChunkHit chunkNo nbPastChunksInCache ->
